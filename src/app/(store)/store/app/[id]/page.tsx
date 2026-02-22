@@ -171,6 +171,7 @@ function ReviewForm({ appId }: { appId: string }) {
 export default function AppDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [installing, setInstalling] = useState<'idle' | 'preparing' | 'ready' | 'error'>('idle');
+
   const [descExpanded, setDescExpanded] = useState(false);
 
   const { data: app, isLoading, isError } = useQuery<App>({
@@ -184,16 +185,23 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
     enabled: !!app,
   });
 
-  const handleInstall = () => {
+  const handleInstall = async () => {
     if (!app?.apkUrl) return;
     setInstalling('preparing');
-    // Build the direct API download URL — no auth required for store downloads.
-    // Navigating to it lets Android intercept the APK and launch the system installer,
-    // which installs the app and returns the user to their home screen automatically.
     const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
     const installUrl = `${API_BASE}/store/apps/${id}/download`;
-    // Create a hidden anchor and click it so the browser treats it as a user-initiated
-    // navigation — this is what Android's download manager listens for to trigger install.
+    try {
+      // Check if the APK is actually available before triggering download
+      const check = await fetch(installUrl, { method: 'HEAD', redirect: 'manual' });
+      if (check.status === 503 || check.status === 404) {
+        setInstalling('error');
+        setTimeout(() => setInstalling('idle'), 5000);
+        return;
+      }
+    } catch {
+      // Network error — attempt download anyway
+    }
+    // Trigger download via hidden anchor (lets Android intercept the APK)
     const a = document.createElement('a');
     a.href = installUrl;
     a.rel = 'noopener noreferrer';
@@ -201,7 +209,6 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
     a.click();
     document.body.removeChild(a);
     setInstalling('ready');
-    // Reset after 8 s so the button is usable again if they come back
     setTimeout(() => setInstalling('idle'), 8000);
   };
 
@@ -297,7 +304,7 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
                   onClick={handleInstall}
                   disabled={installing === 'preparing' || !app.apkUrl}
                   className="btn-primary"
-                  style={{ padding: 'var(--space-3) var(--space-8)', fontSize: 'var(--text-body)', fontWeight: 700, opacity: !app.apkUrl ? 0.5 : 1, minWidth: '200px', background: installing === 'ready' ? '#16a34a' : accentColor, transition: 'background 0.3s' }}
+                  style={{ padding: 'var(--space-3) var(--space-8)', fontSize: 'var(--text-body)', fontWeight: 700, opacity: !app.apkUrl ? 0.5 : 1, minWidth: '200px', background: installing === 'ready' ? '#16a34a' : installing === 'error' ? '#dc2626' : accentColor, transition: 'background 0.3s' }}
                 >
                   {!app.apkUrl
                     ? 'Not Available'
@@ -305,11 +312,18 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
                       ? '⚙️ Preparing…'
                       : installing === 'ready'
                         ? '✓ Check your notifications'
-                        : '📲 Install'}
+                        : installing === 'error'
+                          ? '⚠ APK not ready yet'
+                          : '📲 Install'}
                 </button>
                 {installing === 'ready' && (
                   <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-primary)', fontWeight: 600, margin: 0 }}>
-                    Tap the downloaded file in your notification bar to install · Android will launch the app automatically after install
+                    Tap the downloaded file in your notification bar to install
+                  </p>
+                )}
+                {installing === 'error' && (
+                  <p style={{ fontSize: 'var(--text-xs)', color: '#dc2626', fontWeight: 600, margin: 0 }}>
+                    The APK is still being processed. Please try again in a few minutes.
                   </p>
                 )}
                 {installing === 'idle' && (
@@ -448,9 +462,9 @@ export default function AppDetailPage({ params }: { params: Promise<{ id: string
                 onClick={handleInstall}
                 disabled={installing === 'preparing' || !app.apkUrl}
                 className="btn-primary"
-                style={{ width: '100%', marginTop: 'var(--space-5)', opacity: !app.apkUrl ? 0.5 : 1, background: installing === 'ready' ? '#16a34a' : accentColor, transition: 'background 0.3s' }}
+                style={{ width: '100%', marginTop: 'var(--space-5)', opacity: !app.apkUrl ? 0.5 : 1, background: installing === 'ready' ? '#16a34a' : installing === 'error' ? '#dc2626' : accentColor, transition: 'background 0.3s' }}
               >
-                {!app.apkUrl ? 'Not Available' : installing === 'preparing' ? '⚙️ Preparing…' : installing === 'ready' ? '✓ Installing…' : '📲 Install'}
+                {!app.apkUrl ? 'Not Available' : installing === 'preparing' ? '⚙️ Preparing…' : installing === 'ready' ? '✓ Installing…' : installing === 'error' ? '⚠ Not ready yet' : '📲 Install'}
               </button>
 
               {app.websiteUrl && (
